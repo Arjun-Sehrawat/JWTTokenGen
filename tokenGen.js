@@ -1,43 +1,48 @@
-import { S3 } from 'aws-sdk';
-import jwt from 'jsonwebtoken';
-import forge from 'node-forge';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { readFileSync, writeFileSync } from 'fs';
 
-const s3 = new S3();
+// Create an S3 client
+const s3Client = new S3Client({ region: 'your-region' }); // Replace 'your-region' with your AWS region
 
-export async function handler(event) {
+exports.handler = async (event, context) => {
+    // S3 bucket and key where the JKS file is stored
+    const bucketName = 'your-s3-bucket-name';
+    const key = 'path/to/your/jks/file.jks';
+
+    // Temporary file to store the downloaded JKS file
+    const tempJksFile = '/tmp/file.jks';
+
     try {
-        const userId = event.queryStringParameters.userId;
-        const serviceName = event.queryStringParameters.serviceName;
-        const keystorePassword = process.env.KEYSTORE_PASSWORD; // Assuming you set this environment variable
-
-        // Retrieve keystore file from S3
-        const params = {
-            Bucket: 'your-s3-bucket-name',
-            Key: 'your-keystore-file-name'
+        // Download the JKS file from S3
+        const getObjectParams = {
+            Bucket: bucketName,
+            Key: key
         };
-        const data = await s3.getObject(params).promise();
-        const keystoreData = data.Body;
+        const { Body } = await s3Client.send(new GetObjectCommand(getObjectParams));
 
-        // Load the keystore using forge
-        const p12Asn1 = forge.asn1.fromDer(keystoreData.toString('binary'));
-        const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, keystorePassword);
+        // Write the downloaded JKS file to a temporary file
+        writeFileSync(tempJksFile, Body);
 
-        // Get the key and certificate
-        const keyData = forge.pki.privateKeyToPem(p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag][0].key);
-        const certData = forge.pki.certificateToPem(p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag][0].cert);
+        // Now you can use tempJksFile for whatever purpose you need in your Lambda function
+        // For example, you might want to read it synchronously
 
-        // Generate JWT token
-        const token = jwt.sign({ userId, serviceName }, keyData, { algorithm: 'RS256' });
+        // Read the JKS file synchronously with the provided password
+        const jksFileContent = readFileSync(tempJksFile, 'utf8'); // Change 'utf8' to the appropriate encoding
+        const password = 'your-keystore-password'; // Replace with your keystore password
+
+        // Perform operations with the JKS file content
+
+        // Don't forget to clean up the temporary file when done
+        // fs.unlinkSync(tempJksFile); // If you're not using Node.js 16.x or later
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ token })
+            body: 'JKS file downloaded successfully and processed.'
         };
-    } catch (err) {
-        console.error(err);
+    } catch (error) {
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Internal Server Error' })
+            body: `Error: ${error.message}`
         };
     }
-}
+};
